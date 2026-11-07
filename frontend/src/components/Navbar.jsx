@@ -16,6 +16,10 @@ const Navbar = () => {
         <Link to="/books" className="hover:text-blue-600">
           Books
         </Link>
+
+        <Link to="/contact" className="hover:text-blue-600">
+          Contact
+        </Link>
       </div>
 
     </nav>

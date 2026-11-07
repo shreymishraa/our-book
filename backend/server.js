@@ -10,6 +10,7 @@ import "./database/schema.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import bookRoutes from "./routes/bookRoutes.js";
+import contactRoutes from "./routes/contactRoutes.js";
 
 const app = express();
 
@@ -74,6 +75,7 @@ app.use("/api/auth/verify-otp", otpLimiter);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/books", bookRoutes);
+app.use("/api/contact", contactRoutes);
 
 // ========================================
 // 4. HEALTH CHECK
