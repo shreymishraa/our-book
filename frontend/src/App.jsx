@@ -5,6 +5,7 @@ import Books from "./pages/Books";
 import ReadBook from "./pages/ReadBook";
 import Register from "./pages/Register";
 import Contact from "./pages/Contact";
+import AdminDashboard from "./pages/AdminDashboard";
 
 function App() {
   return (
@@ -17,6 +18,8 @@ function App() {
         <Route path="/books/:id" element={<ReadBook />} />
         <Route path="/register" element={<Register />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/messages" element={<AdminDashboard />} />
       </Routes>
     </>
   );

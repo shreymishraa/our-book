@@ -1,6 +1,14 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
-import { submitContact } from "../controllers/contactController.js";
+import { 
+    submitContact, 
+    getAllContacts, 
+    deleteContact 
+} from "../controllers/contactController.js";
+import { 
+    authenticateUser, 
+    authorizeAdmin 
+} from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -16,6 +24,11 @@ const contactLimiter = rateLimit({
     }
 });
 
+// Public contact submission
 router.post("/", contactLimiter, submitContact);
+
+// Admin-only endpoints to view and manage inquiries
+router.get("/admin", authenticateUser, authorizeAdmin, getAllContacts);
+router.delete("/admin/:id", authenticateUser, authorizeAdmin, deleteContact);
 
 export default router;

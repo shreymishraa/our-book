@@ -401,3 +401,38 @@ export const verifyUserOTP = async (req, res) => {
     }
 
 };
+
+// ==========================================
+// 4. GET ALL REGISTERED USERS (ADMIN ONLY)
+// ==========================================
+
+export const getAllUsers = (req, res) => {
+    try {
+        const users = db.prepare(`
+            SELECT 
+                id, 
+                name, 
+                email, 
+                country_code, 
+                mobile, 
+                role, 
+                is_verified, 
+                datetime(verified_at, 'unixepoch', 'localtime') AS verified_at,
+                datetime(created_at, 'unixepoch', 'localtime') AS created_at
+            FROM users
+            ORDER BY id DESC
+        `).all();
+
+        return res.status(200).json({
+            success: true,
+            totalUsers: users.length,
+            users
+        });
+    } catch (error) {
+        console.error("Get users error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Unable to fetch registered users"
+        });
+    }
+};

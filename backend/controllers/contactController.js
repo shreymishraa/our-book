@@ -67,3 +67,70 @@ export const submitContact = async (req, res) => {
         });
     }
 };
+
+/**
+ * Retrieve all contact inquiries (Admin only).
+ */
+export const getAllContacts = (req, res) => {
+    try {
+        const contacts = db.prepare(`
+            SELECT 
+                id, 
+                name, 
+                email, 
+                subject, 
+                message, 
+                datetime(created_at, 'unixepoch', 'localtime') AS created_at
+            FROM contacts
+            ORDER BY id DESC
+        `).all();
+
+        return res.status(200).json({
+            success: true,
+            totalContacts: contacts.length,
+            contacts
+        });
+    } catch (error) {
+        console.error("Get contacts error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Unable to fetch contact messages"
+        });
+    }
+};
+
+/**
+ * Delete a contact inquiry (Admin only).
+ */
+export const deleteContact = (req, res) => {
+    try {
+        const contactId = Number(req.params.id);
+
+        if (!Number.isInteger(contactId) || contactId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid contact ID"
+            });
+        }
+
+        const result = db.prepare(`DELETE FROM contacts WHERE id = ?`).run(contactId);
+
+        if (result.changes === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Contact message not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Contact message deleted successfully"
+        });
+    } catch (error) {
+        console.error("Delete contact error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Unable to delete contact message"
+        });
+    }
+};
