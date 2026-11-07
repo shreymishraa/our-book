@@ -4,24 +4,24 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 const booksData = [
   {
     id: 1,
+    title: "Mathematics Fundamentals",
+    subject: "Mathematics",
+    description: "Understand mathematical concepts and problem solving.",
+    icon: "📐",
+  },
+  {
+    id: 2,
     title: "English Grammar",
     subject: "English",
     description: "Learn English grammar and improve your language skills.",
     icon: "📘",
   },
   {
-    id: 2,
+    id: 3,
     title: "Hindi Vyakaran",
     subject: "Hindi",
     description: "Learn Hindi grammar and literature.",
     icon: "📕",
-  },
-  {
-    id: 3,
-    title: "Mathematics Fundamentals",
-    subject: "Mathematics",
-    description: "Understand mathematical concepts and problem solving.",
-    icon: "📐",
   },
   {
     id: 4,
