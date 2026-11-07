@@ -2,22 +2,44 @@ import db from "../config/database.js";
 import jwt from "jsonwebtoken";
 
 import {
-    generateOTP,
-    verifyOTP
-} from "../services/otpService.js";
+    sendVerification,
+    checkVerification
+} from "../services/twilioService.js";
 
-// Register new user
+// ==========================================
+// HELPERS
+// ==========================================
+
+/**
+ * Normalize a phone number to E.164 format.
+ * @param {string} countryCode - e.g. "+91"
+ * @param {string} mobile      - e.g. "9876543210"
+ * @returns {string} E.164 phone number e.g. "+919876543210"
+ */
+const toE164 = (countryCode, mobile) => {
+    // Ensure country code starts with +
+    const code = countryCode.startsWith("+")
+        ? countryCode
+        : `+${countryCode}`;
+
+    // Remove any leading zeros from mobile
+    const cleanMobile = mobile.replace(/^0+/, "");
+
+    return `${code}${cleanMobile}`;
+};
+
+// ==========================================
+// 1. REGISTER USER
+// ==========================================
 
 export const registerUser = (req, res) => {
 
     try {
 
         // Get user details
-
-        const { name, email, mobile } = req.body;
+        const { name, email, mobile, countryCode } = req.body;
 
         // Validate empty fields
-
         if (!name || !email || !mobile) {
 
             return res.status(400).json({
@@ -28,13 +50,13 @@ export const registerUser = (req, res) => {
         }
 
         // Normalize input
-
         const cleanName = name.trim();
         const cleanEmail = email.trim().toLowerCase();
         const cleanMobile = mobile.trim();
+        let rawCountry = (countryCode || "+91").trim();
+        const cleanCountryCode = rawCountry.startsWith("+") ? rawCountry : `+${rawCountry}`;
 
         // Validate email
-
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
         if (!emailRegex.test(cleanEmail)) {
@@ -46,23 +68,74 @@ export const registerUser = (req, res) => {
 
         }
 
-        // Validate mobile number
-
-        if (!/^[0-9]{10}$/.test(cleanMobile)) {
+        // Validate mobile number (allow 7-15 digits for international support)
+        if (!/^[0-9]{7,15}$/.test(cleanMobile)) {
 
             return res.status(400).json({
                 success: false,
-                message: "Enter a valid 10-digit mobile number"
+                message: "Enter a valid mobile number"
             });
 
         }
 
-        // Insert user into database
+        // Validate country code (must start with + followed by 1-4 digits)
+        if (!/^\+[1-9]\d{0,3}$/.test(cleanCountryCode)) {
 
+            return res.status(400).json({
+                success: false,
+                message: "Enter a valid country code (e.g. +91)"
+            });
+
+        }
+
+        // Check if user already exists and is verified
+        const existingUser = db.prepare(`
+            SELECT id, is_verified
+            FROM users
+            WHERE email = ? OR mobile = ?
+        `).get(cleanEmail, cleanMobile);
+
+        if (existingUser && existingUser.is_verified === 1) {
+
+            return res.status(409).json({
+                success: false,
+                message: "Email or mobile number already registered and verified"
+            });
+
+        }
+
+        // If user exists but is not verified, return their ID to proceed with OTP
+        if (existingUser && existingUser.is_verified === 0) {
+
+            // Update user details in case they changed
+            db.prepare(`
+                UPDATE users
+                SET name = ?, email = ?, mobile = ?, country_code = ?
+                WHERE id = ?
+            `).run(cleanName, cleanEmail, cleanMobile, cleanCountryCode, existingUser.id);
+
+            return res.status(200).json({
+
+                success: true,
+                message: "User found. Please verify your account.",
+
+                user: {
+                    id: existingUser.id,
+                    name: cleanName,
+                    email: cleanEmail,
+                    mobile: cleanMobile,
+                    countryCode: cleanCountryCode
+                }
+
+            });
+
+        }
+
+        // Insert new user into database
         const result = db.prepare(`
-            INSERT INTO users (name, email, mobile)
-            VALUES (?, ?, ?)
-        `).run(cleanName, cleanEmail, cleanMobile);
+            INSERT INTO users (name, email, mobile, country_code)
+            VALUES (?, ?, ?, ?)
+        `).run(cleanName, cleanEmail, cleanMobile, cleanCountryCode);
 
         return res.status(201).json({
 
@@ -73,7 +146,8 @@ export const registerUser = (req, res) => {
                 id: result.lastInsertRowid,
                 name: cleanName,
                 email: cleanEmail,
-                mobile: cleanMobile
+                mobile: cleanMobile,
+                countryCode: cleanCountryCode
             }
 
         });
@@ -99,13 +173,17 @@ export const registerUser = (req, res) => {
     }
 
 };
-// Generate OTP for user
-export const sendOTP = (req, res) => {
+
+// ==========================================
+// 2. SEND OTP VIA TWILIO VERIFY
+// ==========================================
+
+export const sendOTP = async (req, res) => {
 
     try {
 
-        // Step 1: Get user ID
-        const { userId } = req.body;
+        // Step 1: Get user ID and channel
+        const { userId, channel } = req.body;
 
         // Step 2: Validate user ID
         if (!Number.isInteger(userId) || userId <= 0) {
@@ -117,14 +195,26 @@ export const sendOTP = (req, res) => {
 
         }
 
-        // Step 3: Find user in database
+        // Step 3: Validate channel
+        const deliveryChannel = channel || "sms";
+
+        if (!["sms", "whatsapp"].includes(deliveryChannel)) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Channel must be 'sms' or 'whatsapp'"
+            });
+
+        }
+
+        // Step 4: Find user in database
         const user = db.prepare(`
-            SELECT id, name, email, mobile, is_verified
+            SELECT id, name, email, mobile, country_code, is_verified
             FROM users
             WHERE id = ?
         `).get(userId);
 
-        // Step 4: Check user existence
+        // Step 5: Check user existence
         if (!user) {
 
             return res.status(404).json({
@@ -134,7 +224,7 @@ export const sendOTP = (req, res) => {
 
         }
 
-        // Step 5: Check verification status
+        // Step 6: Check verification status
         if (user.is_verified === 1) {
 
             return res.status(400).json({
@@ -144,22 +234,27 @@ export const sendOTP = (req, res) => {
 
         }
 
-        // Step 6: Generate OTP
-        const { otp, expiresAt } = generateOTP(userId);
+        // Step 7: Build E.164 phone number
+        const phoneE164 = toE164(user.country_code, user.mobile);
 
-        // Step 7: Display OTP during development
-        if (process.env.NODE_ENV === "development") {
+        // Step 8: Send verification via Twilio Verify
+        const result = await sendVerification(phoneE164, deliveryChannel);
 
-            console.log(`Development OTP for user ${userId}: ${otp}`);
+        if (!result.success) {
+
+            return res.status(400).json({
+                success: false,
+                message: result.message
+            });
 
         }
 
-        // Step 8: Return success response
+        // Step 9: Return success response (never expose OTP)
         return res.status(200).json({
 
             success: true,
-            message: "OTP generated successfully",
-            expiresAt
+            message: result.message,
+            channel: deliveryChannel
 
         });
 
@@ -171,30 +266,31 @@ export const sendOTP = (req, res) => {
         return res.status(500).json({
 
             success: false,
-            message: "Unable to generate OTP"
+            message: "Unable to send verification code"
 
         });
 
     }
 
 };
-// Verify OTP and generate JWT
 
-export const verifyUserOTP = (req, res) => {
+// ==========================================
+// 3. VERIFY OTP VIA TWILIO VERIFY
+// ==========================================
+
+export const verifyUserOTP = async (req, res) => {
 
     try {
 
-        // Step 1: Get user ID and OTP
-
+        // Step 1: Get user ID and OTP code
         const { userId, otp } = req.body;
 
         // Step 2: Validate input
-
         if (!userId || !otp) {
 
             return res.status(400).json({
                 success: false,
-                message: "User ID and OTP are required"
+                message: "User ID and verification code are required"
             });
 
         }
@@ -210,15 +306,14 @@ export const verifyUserOTP = (req, res) => {
 
             return res.status(400).json({
                 success: false,
-                message: "Invalid user ID or OTP format"
+                message: "Invalid user ID or verification code format"
             });
 
         }
 
         // Step 3: Find user
-
         const user = db.prepare(`
-            SELECT id, name, email, mobile, is_verified
+            SELECT id, name, email, mobile, country_code, is_verified
             FROM users
             WHERE id = ?
         `).get(parsedUserId);
@@ -233,7 +328,6 @@ export const verifyUserOTP = (req, res) => {
         }
 
         // Step 4: Check verification status
-
         if (user.is_verified === 1) {
 
             return res.status(400).json({
@@ -243,22 +337,30 @@ export const verifyUserOTP = (req, res) => {
 
         }
 
-        // Step 5: Verify OTP
+        // Step 5: Build E.164 phone number
+        const phoneE164 = toE164(user.country_code, user.mobile);
 
-        const result = verifyOTP(parsedUserId, otp);
+        // Step 6: Verify OTP via Twilio Verify
+        const result = await checkVerification(phoneE164, otp);
 
         if (!result.success) {
 
             return res.status(400).json({
                 success: false,
-                message: result.message,
-                attemptsRemaining: result.attemptsRemaining
+                message: result.message
             });
 
         }
 
-        // Step 6: Generate JWT
+        // Step 7: Update user verification status
+        db.prepare(`
+            UPDATE users
+            SET is_verified = 1,
+                verified_at = unixepoch()
+            WHERE id = ?
+        `).run(parsedUserId);
 
+        // Step 8: Generate JWT
         const token = jwt.sign(
             {
                 userId: user.id
@@ -269,13 +371,12 @@ export const verifyUserOTP = (req, res) => {
             }
         );
 
-        // Step 7: Return response
-
+        // Step 9: Return response
         return res.status(200).json({
 
             success: true,
 
-            message: "OTP verified successfully",
+            message: "Verification successful",
 
             token,
 
@@ -294,7 +395,7 @@ export const verifyUserOTP = (req, res) => {
 
         return res.status(500).json({
             success: false,
-            message: "OTP verification failed"
+            message: "Verification failed. Please try again."
         });
 
     }

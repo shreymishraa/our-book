@@ -24,7 +24,9 @@ app.use(
     cors({
         origin: [
             "http://localhost:5173",
-            "http://localhost:5174"
+            "http://localhost:5174",
+            "http://localhost:5175",
+            "http://localhost:5176"
         ],
         methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowedHeaders: ["Content-Type", "Authorization"]
@@ -50,6 +52,21 @@ const limiter = rateLimit({
 });
 
 app.use("/api", limiter);
+
+// Stricter rate limit for OTP endpoints (5 requests per 10 minutes per IP)
+const otpLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    limit: 5,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: "Too many OTP requests. Please wait before trying again."
+    }
+});
+
+app.use("/api/auth/send-otp", otpLimiter);
+app.use("/api/auth/verify-otp", otpLimiter);
 
 // ========================================
 // 3. API ROUTES
